@@ -104,12 +104,21 @@ class WorkTimeApp(TkinterDnD.Tk):
         self.settings_frame.rowconfigure(0, weight=1)
 
 
-    def create_result_ui(self, hours, minutes):
+    def create_result_ui(self, hours, minutes, df):
         for widget in self.result_frame.winfo_children():
             widget.destroy()  # 既存のウィジェットを削除
 
         result_label = tk.Label(self.result_frame, text=f"総勤務時間: {hours}時間{minutes}分")
         result_label.pack(pady=20)
+
+        # 丸めた時刻を表示するテキストエリアを追加
+        text_area = scrolledtext.ScrolledText(self.result_frame, wrap=tk.WORD, height=10)
+        text_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
+        for _, row in df.iterrows():
+            text_area.insert(tk.INSERT, f"{row['日付']}\t{row['出勤']}\t{row['休始']}\t{row['休終']}\t{row['退勤']}\t{row['実働']}\n")
+        text_area.configure(state='disabled')
 
         ok_button = tk.Button(self.result_frame, text="OK", command=self.reset_app)
         ok_button.pack(pady=10)
@@ -129,11 +138,11 @@ class WorkTimeApp(TkinterDnD.Tk):
         return df  
 
     def execute_calculation(self):
-        hours, minutes = self.process_file(self.file_path)
+        hours, minutes, df = self.process_file(self.file_path)  # 丸めた時刻を含むデータフレームを受け取る
         self.settings_frame.pack_forget()
-        self.create_result_ui(hours, minutes)
+        self.create_result_ui(hours, minutes, df)  # 丸めた時刻を含むデータフレームを渡す
         self.result_frame.pack(fill=tk.BOTH, expand=True)
-    
+
     def reset_app(self):
         self.result_frame.pack_forget()
         self.create_upload_ui()
@@ -156,20 +165,37 @@ class WorkTimeApp(TkinterDnD.Tk):
 
     def process_file(self, file_path):
         df = pd.read_csv(file_path)
+        
         # 出勤時間の丸め処理
         df['出勤'] = df['出勤'].apply(lambda x: self.round_time(x, self.start_round_option.get(), "start"))
-
+        
         # 退勤時間の丸め処理
         df['退勤'] = df['退勤'].apply(lambda x: self.round_time(x, self.end_round_option.get(), "end"))
+        
         # 休憩時間の丸め処理
         df['休終'] = df['休終'].apply(lambda x: self.round_break_end_time(x, self.break_end_round_option.get()))
-
-
-        df.dropna(subset=['出勤'], inplace=True)
-        # 勤務終了時刻が記録されていない場合、休憩開始時刻を勤務終了時刻として扱う処理
-        for index, row in df.iterrows():
-            if pd.isna(row['退勤']) and not pd.isna(row['休始']):
-                df.at[index, '退勤'] = row['休始']
+        
+        # 出勤時間が記録されていない行を除外
+        df = df.dropna(subset=['出勤'])
+        
+        # 退勤時刻が記録されていない場合、休憩開始時刻を勤務終了時刻として扱う処理
+    def process_file(self, file_path):
+        df = pd.read_csv(file_path)
+        
+        # 出勤時間の丸め処理
+        df['出勤'] = df['出勤'].apply(lambda x: self.round_time(x, self.start_round_option.get(), "start"))
+        
+        # 退勤時間の丸め処理
+        df['退勤'] = df['退勤'].apply(lambda x: self.round_time(x, self.end_round_option.get(), "end"))
+        
+        # 休憩時間の丸め処理
+        df['休終'] = df['休終'].apply(lambda x: self.round_break_end_time(x, self.break_end_round_option.get()))
+        
+        # 出勤時間が記録されていない行を除外
+        df = df.dropna(subset=['出勤'])
+        
+        # 退勤時刻が記録されていない場合、休憩開始時刻を勤務終了時刻として扱う処理
+        df['退勤'] = df.apply(lambda row: row['休始'] if (":" not in row['退勤'] and ":" in row['休始']) else row['退勤'], axis=1)
 
         total_work_seconds = 0
         for _, row in df.iterrows():
@@ -178,11 +204,11 @@ class WorkTimeApp(TkinterDnD.Tk):
             work_time = end_time - start_time
             break_time = calculate_break_time(row['休始'], row['休終'])
             total_work_seconds += (work_time - break_time).total_seconds()
-
+        
         total_hours = total_work_seconds // 3600
         total_minutes = (total_work_seconds % 3600) // 60
-        return int(total_hours), int(total_minutes)
-
+        
+        return int(total_hours), int(total_minutes), df  # 丸めた時刻を含むデータフレームを返す
     def round_break_end_time(self, time_str, option):
         if pd.isna(time_str) or time_str in ['−', '-'] or option == "そのまま":
             return time_str
