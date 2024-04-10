@@ -29,6 +29,7 @@ class WorkTimeApp(TkinterDnD.Tk):
         # 出勤時間と退勤時間の丸め選択用変数
         self.start_round_option = tk.StringVar(value="そのまま")
         self.end_round_option = tk.StringVar(value="そのまま")
+        self.break_start_round_option = tk.StringVar(value="そのまま") 
         self.break_end_round_option = tk.StringVar(value="そのまま")
 
     def on_drop(self, event):
@@ -88,12 +89,19 @@ class WorkTimeApp(TkinterDnD.Tk):
         end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.end_round_option, values=["12:40", "12:00 & 18:30", "そのまま"], width=15)
         end_round_menu.grid(row=4, column=1, pady=5, sticky='w')
 
+        # 休憩開始時刻の丸め選択
+        break_start_round_label = tk.Label(self.settings_frame, text="休憩開始時刻の丸め選択：")
+        break_start_round_label.grid(row=5, column=0, pady=5, sticky='e')
+
+        break_start_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_start_round_option, values=["12:00", "そのまま"], width=15)
+        break_start_round_menu.grid(row=5, column=1, pady=5, sticky='w')
+
         # 休憩終了時刻の丸め選択
         break_end_round_label = tk.Label(self.settings_frame, text="休憩終了時刻の丸め選択：")
-        break_end_round_label.grid(row=5, column=0, pady=5, sticky='e')
+        break_end_round_label.grid(row=6, column=0, pady=5, sticky='e')
 
         break_end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_end_round_option, values=["14:25", "そのまま"], width=15)
-        break_end_round_menu.grid(row=5, column=1, pady=5, sticky='w')
+        break_end_round_menu.grid(row=6, column=1, pady=5, sticky='w')
 
         execute_button = tk.Button(self.settings_frame, text="計算を実行", command=self.execute_calculation)
         execute_button.grid(row=2, column=0, columnspan=2, pady=20)        
@@ -193,7 +201,11 @@ class WorkTimeApp(TkinterDnD.Tk):
         
         # 退勤時間の丸め処理
         df['退勤'] = df['退勤'].apply(lambda x: self.round_time(x, self.end_round_option.get(), "end"))
-        
+
+        # 休憩開始時刻の丸め処理
+        df['休始'] = df['休始'].apply(lambda x: self.round_break_start_time(x, self.break_start_round_option.get()))
+
+
         # 休憩時間の丸め処理
         df['休終'] = df['休終'].apply(lambda x: self.round_break_end_time(x, self.break_end_round_option.get()))
         
@@ -226,7 +238,15 @@ class WorkTimeApp(TkinterDnD.Tk):
             return "14:25"
         else:
             return time_str
+    def round_break_start_time(self, time_str, option):
+        if pd.isna(time_str) or time_str in ['−', '-'] or option == "そのまま":
+            return time_str
 
+        time_obj = datetime.strptime(time_str, '%H:%M')
+        if option == "12:00" and datetime.strptime("11:30", '%H:%M') <= time_obj <= datetime.strptime("12:00", '%H:%M'):
+            return "12:00"
+
+        return time_str
 
 def calculate_break_time(start, end):
     if pd.isna(start) or pd.isna(end) or start in ['−', '-'] or end in ['−', '-']:
