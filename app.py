@@ -85,7 +85,7 @@ class WorkTimeApp(TkinterDnD.Tk):
         end_round_label = tk.Label(self.settings_frame, text="退勤時間の丸め選択：")
         end_round_label.grid(row=4, column=0, pady=5, sticky='e')
 
-        end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.end_round_option, values=["12:40", "そのまま"], width=15)
+        end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.end_round_option, values=["12:40", "12:00 & 18:30", "そのまま"], width=15)
         end_round_menu.grid(row=4, column=1, pady=5, sticky='w')
 
         # 休憩終了時刻の丸め選択
@@ -158,9 +158,15 @@ class WorkTimeApp(TkinterDnD.Tk):
                 return "8:30" if (datetime.strptime("8:30", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
             elif option == "9:00":
                 return "9:00" if (datetime.strptime("9:00", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
-        elif type == "end" and option == "12:40" and time_obj > datetime.strptime("12:00", '%H:%M'):
-            return "12:40" if (time_obj - datetime.strptime("12:40", '%H:%M')).total_seconds() / 60 <= 30 else time_str
-        
+        elif type == "end":
+            if option == "12:40" and time_obj > datetime.strptime("12:00", '%H:%M'):
+                return "12:40" if (time_obj - datetime.strptime("12:40", '%H:%M')).total_seconds() / 60 <= 30 else time_str
+            elif option == "12:00&18:30":
+                if time_obj > datetime.strptime("11:30", '%H:%M'):
+                    return "12:00" if (datetime.strptime("12:00", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
+                elif time_obj > datetime.strptime("18:00", '%H:%M'):
+                    return "18:30" if (datetime.strptime("18:30", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
+
         return time_str
 
     def process_file(self, file_path):
