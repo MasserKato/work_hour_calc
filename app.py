@@ -93,14 +93,14 @@ class WorkTimeApp(TkinterDnD.Tk):
         break_start_round_label = tk.Label(self.settings_frame, text="休憩開始時刻の丸め選択：")
         break_start_round_label.grid(row=5, column=0, pady=5, sticky='e')
 
-        break_start_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_start_round_option, values=["12:00", "そのまま"], width=15)
+        break_start_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_start_round_option, values=["12:00","12:40", "そのまま"], width=15)
         break_start_round_menu.grid(row=5, column=1, pady=5, sticky='w')
 
         # 休憩終了時刻の丸め選択
         break_end_round_label = tk.Label(self.settings_frame, text="休憩終了時刻の丸め選択：")
         break_end_round_label.grid(row=6, column=0, pady=5, sticky='e')
 
-        break_end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_end_round_option, values=["14:25", "そのまま"], width=15)
+        break_end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_end_round_option, values=["14:25","15:00", "そのまま"], width=15)
         break_end_round_menu.grid(row=6, column=1, pady=5, sticky='w')
 
         execute_button = tk.Button(self.settings_frame, text="計算を実行", command=self.execute_calculation)
@@ -163,17 +163,17 @@ class WorkTimeApp(TkinterDnD.Tk):
         time_obj = datetime.strptime(time_str, '%H:%M')
         if type == "start":
             if option == "8:30" and time_obj < datetime.strptime("9:00", '%H:%M'):
-                return "8:30" if (datetime.strptime("8:30", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
+                return "8:30" if (datetime.strptime("8:30", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
             elif option == "9:00":
-                return "9:00" if (datetime.strptime("9:00", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
+                return "9:00" if (datetime.strptime("9:00", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
         elif type == "end":
             if option == "12:40" and time_obj > datetime.strptime("12:00", '%H:%M'):
-                return "12:40" if (time_obj - datetime.strptime("12:40", '%H:%M')).total_seconds() / 60 <= 30 else time_str
+                return "12:40" if (time_obj - datetime.strptime("12:40", '%H:%M')).total_seconds() / 60 <= 20 else time_str
             elif option == "12:00&18:30":
                 if time_obj > datetime.strptime("11:30", '%H:%M'):
-                    return "12:00" if (datetime.strptime("12:00", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
+                    return "12:00" if (datetime.strptime("12:00", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
                 elif time_obj > datetime.strptime("18:00", '%H:%M'):
-                    return "18:30" if (datetime.strptime("18:30", '%H:%M') - time_obj).total_seconds() / 60 <= 30 else time_str
+                    return "18:30" if (datetime.strptime("18:30", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
 
         return time_str
 
@@ -230,12 +230,14 @@ class WorkTimeApp(TkinterDnD.Tk):
     def round_break_end_time(self, time_str, option):
         if pd.isna(time_str) or time_str in ['−', '-'] or option == "そのまま":
             return time_str
-
         time_obj = datetime.strptime(time_str, '%H:%M')
-        round_time_obj = datetime.strptime("14:25", '%H:%M')
+        elif option == "15:00":
+            round_time_obj = datetime.strptime("15:00", '%H:%M')
+        elif option == "14:25":
+            round_time_obj = datetime.strptime("14:25", '%H:%M')
         
-        if time_obj > round_time_obj and (time_obj - round_time_obj).total_seconds() / 60 <= 60:
-            return "14:25"
+        if time_obj > round_time_obj and (time_obj - round_time_obj).total_seconds() / 60 <= 20:
+            return option
         else:
             return time_str
     def round_break_start_time(self, time_str, option):
@@ -245,6 +247,8 @@ class WorkTimeApp(TkinterDnD.Tk):
         time_obj = datetime.strptime(time_str, '%H:%M')
         if option == "12:00" and datetime.strptime("11:30", '%H:%M') <= time_obj <= datetime.strptime("12:00", '%H:%M'):
             return "12:00"
+        elif option == "12:40" and datetime.strptime("12:20", '%H:%M') <= time_obj <= datetime.strptime("12:40", '%H:%M'):
+            return "12:40"
 
         return time_str
 
