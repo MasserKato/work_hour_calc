@@ -71,7 +71,7 @@ class WorkTimeApp(TkinterDnD.Tk):
 
         text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
         for row in data:
-            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[4]}\t{row[5]}\n")
+            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[6]\t{row[15]}\n")
         text_area.configure(state='disabled')
 
         # 出勤時間の丸め選択
@@ -124,7 +124,7 @@ class WorkTimeApp(TkinterDnD.Tk):
 
         text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
         for row in df:
-            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[4]}\t{row[5]}\n")
+            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[6]}\t{row[15]}\n")
         text_area.configure(state='disabled')
 
         ok_button = tk.Button(self.result_frame, text="OK", command=self.reset_app)
@@ -188,7 +188,7 @@ class WorkTimeApp(TkinterDnD.Tk):
             row[1] = self.round_time(row[1], self.start_round_option.get(), "start")
         
             # 退勤時間の丸め処理
-            row[4] = self.round_time(row[4], self.end_round_option.get(), "end")
+            row[6] = self.round_time(row[6], self.end_round_option.get(), "end")
         
             # 休憩時間の丸め処理
             row[3] = self.round_break_end_time(row[3], self.break_end_round_option.get())
@@ -197,13 +197,13 @@ class WorkTimeApp(TkinterDnD.Tk):
             row[2] = self.round_break_start_time(row[2], self.break_start_round_option.get())
         
             # 退勤時刻が記録されていない場合、休憩開始時刻を勤務終了時刻として扱う処理
-            if ":" not in row[4] and ":" in row[2]:
-                row[4] = row[2]
+            if ":" not in row[6] and ":" in row[2]:
+                row[6] = row[2]
     
         total_work_seconds = 0
         for row in data:
             start_time = datetime.strptime(row[1], '%H:%M')
-            end_time = datetime.strptime(row[4], '%H:%M')
+            end_time = datetime.strptime(row[6], '%H:%M')
             work_time = end_time - start_time
             break_time = calculate_break_time(row[2], row[3])
             total_work_seconds += (work_time - break_time).total_seconds()
