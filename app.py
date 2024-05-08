@@ -231,7 +231,7 @@ class WorkTimeApp(TkinterDnD.Tk):
         if pd.isna(time_str) or time_str in ['−', '-'] or option == "そのまま":
             return time_str
         time_obj = datetime.strptime(time_str, '%H:%M')
-        elif option == "15:00":
+        if option == "15:00":
             round_time_obj = datetime.strptime("15:00", '%H:%M')
         elif option == "14:25":
             round_time_obj = datetime.strptime("14:25", '%H:%M')
