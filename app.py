@@ -70,8 +70,8 @@ class WorkTimeApp(TkinterDnD.Tk):
         text_area.grid(row=0, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
 
         text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
-        for _, row in df.iterrows():
-            text_area.insert(tk.INSERT, f"{row['日付']}\t{row['出勤']}\t{row['休始']}\t{row['休終']}\t{row['退勤']}\t{row['実働']}\n")
+        for row in data:
+            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[4]}\t{row[5]}\n")
         text_area.configure(state='disabled')
 
         # 出勤時間の丸め選択
@@ -123,8 +123,8 @@ class WorkTimeApp(TkinterDnD.Tk):
         text_area.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
-        for _, row in df.iterrows():
-            text_area.insert(tk.INSERT, f"{row['日付']}\t{row['出勤']}\t{row['休始']}\t{row['休終']}\t{row['退勤']}\t{row['実働']}\n")
+        for row in df:
+            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[4]}\t{row[5]}\n")
         text_area.configure(state='disabled')
 
         ok_button = tk.Button(self.result_frame, text="OK", command=self.reset_app)
@@ -149,9 +149,9 @@ class WorkTimeApp(TkinterDnD.Tk):
         return data
 
     def execute_calculation(self):
-        hours, minutes, df = self.process_file(self.file_path)  # 丸めた時刻を含むデータフレームを受け取る
+        hours, minutes, data = self.process_file(self.file_path)  # 丸めた時刻を含むデータフレームを受け取る
         self.settings_frame.pack_forget()
-        self.create_result_ui(hours, minutes, df)  # 丸めた時刻を含むデータフレームを渡す
+        self.create_result_ui(hours, minutes, data)  # 丸めた時刻を含むデータフレームを渡す
         self.result_frame.pack(fill=tk.BOTH, expand=True)
 
     def reset_app(self):
