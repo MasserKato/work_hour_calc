@@ -218,21 +218,18 @@ class WorkTimeApp(TkinterDnD.Tk):
         if time_str == '' or time_str in ['−', '-'] or option == "そのまま":
             return time_str
         time_obj = datetime.strptime(time_str, '%H:%M')
-        if option == "15:00":
-            round_time_obj = datetime.strptime("15:00", '%H:%M')
-        elif option == "14:25":
-            round_time_obj = datetime.strptime("14:25", '%H:%M')
-        
-        if time_obj > round_time_obj and (time_obj - round_time_obj).total_seconds() / 60 <= 20:
-            return option
-        else:
-            return time_str
+        if option == "15:00" and datetime.strptime("14:45", '%H:%M') <= time_obj <= datetime.strptime("15:00", '%H:%M'):
+            return "15:00"
+        elif option == "14:25" and datetime.strptime("14:05", '%H:%M') <= time_obj <= datetime.strptime("14:25", '%H:%M'):
+            return "14:25"
+        return time_str 
+    
     def round_break_start_time(self, time_str, option):
         if time_str == '' or time_str in ['−', '-'] or option == "そのまま":
             return time_str
 
         time_obj = datetime.strptime(time_str, '%H:%M')
-        if option == "12:00" and datetime.strptime("11:30", '%H:%M') <= time_obj <= datetime.strptime("12:00", '%H:%M'):
+        if option == "12:00" and datetime.strptime("11:40", '%H:%M') <= time_obj <= datetime.strptime("12:00", '%H:%M'):
             return "12:00"
         elif option == "12:40" and datetime.strptime("12:20", '%H:%M') <= time_obj <= datetime.strptime("12:40", '%H:%M'):
             return "12:40"
