@@ -61,7 +61,7 @@ class WorkTimeApp(TkinterDnD.Tk):
         drop_frame.drop_target_register(DND_FILES)
         drop_frame.dnd_bind('<<Drop>>', self.on_drop)
 
-    def create_settings_ui(self, df):
+    def create_settings_ui(self, data):
         for widget in self.settings_frame.winfo_children():
             widget.destroy()
 
