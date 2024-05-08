@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, scrolledtext
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from datetime import datetime, timedelta
-
+import csv
 
 
 class WorkTimeApp(TkinterDnD.Tk):
@@ -137,6 +137,7 @@ class WorkTimeApp(TkinterDnD.Tk):
             self.upload_frame.pack_forget()
             self.create_settings_ui(df)
             self.settings_frame.pack(fill=tk.BOTH, expand=True)
+
     def read_file(self, file_path):
         data = []
         with open(file_path, 'r', encoding='utf-8') as file:
