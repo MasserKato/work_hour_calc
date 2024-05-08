@@ -9,7 +9,7 @@ options = {
     'build_exe': {
         'packages': packages,
         'include_files': include_files,
-        'excludes': ['tcl', 'ttk', 'tkinter'],
+        'excludes': ['tcl', 'ttk', 'tkinter','numpy'],
     },
 }
 
