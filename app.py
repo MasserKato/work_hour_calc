@@ -71,7 +71,7 @@ class WorkTimeApp(TkinterDnD.Tk):
 
         text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
         for row in data:
-            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[6]\t{row[15]}\n")
+            text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[6]}\t{row[15]}\n")
         text_area.configure(state='disabled')
 
         # 出勤時間の丸め選択
