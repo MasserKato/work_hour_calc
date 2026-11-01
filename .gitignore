@@ -1,0 +1,4 @@
+# cx_Freeze の生成物。ビルド環境の Python や OpenSSL などを同梱するためコミットしない。
+build/
+__pycache__/
+*.py[cod]
