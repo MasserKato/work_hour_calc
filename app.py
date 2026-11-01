@@ -1,15 +1,121 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk, scrolledtext
-from tkinterdnd2 import DND_FILES, TkinterDnD
-from datetime import datetime, timedelta
 import csv
+import io
+import os
+import stat
+import tkinter as tk
+from datetime import datetime, timedelta
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+from tkinterdnd2 import DND_FILES, TkinterDnD
+
+# 勤務表CSVは小さい。巨大ファイルや異常な表でのメモリ枯渇を避ける。
+MAX_CSV_BYTES = 8 * 1024 * 1024
+MAX_DATA_ROWS = 20000
+MAX_COLUMNS = 512
+REQUIRED_COLUMNS = 16
+MAX_DROP_CHARS = 1024 * 1024
+
+
+class CsvInputError(Exception):
+    """利用者が読める、入力拒否の理由。"""
+
+
+def _blocked_os_path(real_path):
+    """デバイスや仮想ファイルシステムは開かない。"""
+    norm = os.path.normpath(real_path)
+    if os.name == "nt":
+        return norm.startswith("\\\\.\\")
+    for prefix in ("/proc", "/sys", "/dev"):
+        if norm == prefix or norm.startswith(prefix + os.sep):
+            return True
+    return False
+
+
+def read_csv_text(file_path):
+    """通常ファイルだけを、サイズ上限つきで UTF-8 テキストとして読む。"""
+    if not isinstance(file_path, str) or file_path == "" or "\x00" in file_path:
+        raise CsvInputError("ファイルパスが不正です。")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOCTTY"):
+        flags |= os.O_NOCTTY
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
+    try:
+        fd = os.open(file_path, flags)
+    except OSError as exc:
+        raise CsvInputError("ファイルを開けません。") from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise CsvInputError("通常のファイルのみ開けます。")
+        if _blocked_os_path(os.path.realpath(file_path)):
+            raise CsvInputError("このパスは開けません。")
+        if info.st_size > MAX_CSV_BYTES:
+            raise CsvInputError("ファイルが大きすぎます。")
+        if hasattr(os, "set_blocking"):
+            os.set_blocking(fd, True)
+        chunks = []
+        remaining = MAX_CSV_BYTES + 1
+        while remaining > 0:
+            block = os.read(fd, min(65536, remaining))
+            if not block:
+                break
+            chunks.append(block)
+            remaining -= len(block)
+    finally:
+        os.close(fd)
+
+    data = b"".join(chunks)
+    if len(data) > MAX_CSV_BYTES:
+        raise CsvInputError("ファイルが大きすぎます。")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CsvInputError("UTF-8として読めないファイルです。") from exc
+    # open() の既定（universal newlines）と同じ変換にする。
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def load_attendance_csv(file_path):
+    """ヘッダーを除き、出勤時刻がある行だけを返す。不正な表は拒否する。"""
+    text = read_csv_text(file_path)
+    reader = csv.reader(io.StringIO(text))
+    try:
+        next(reader)
+    except StopIteration as exc:
+        raise CsvInputError("CSVにデータがありません。") from exc
+    except csv.Error as exc:
+        raise CsvInputError("CSVとして読めません。") from exc
+
+    data = []
+    try:
+        for row in reader:
+            if len(row) > MAX_COLUMNS:
+                raise CsvInputError("列数が多すぎます。")
+            if any("\x00" in cell for cell in row):
+                raise CsvInputError("不正な文字が含まれています。")
+            if len(row) < 2 or row[1] == "":
+                # 従来どおり、出勤時刻がない行は集計しない。
+                # 完全な空行、または出勤列が空の短い行はスキップする。
+                if len(row) >= 2 or not any(cell.strip() for cell in row):
+                    continue
+                raise CsvInputError("列数が不足している行があります。")
+            if len(row) < REQUIRED_COLUMNS:
+                raise CsvInputError("列数が不足している行があります。")
+            data.append(row)
+            if len(data) > MAX_DATA_ROWS:
+                raise CsvInputError("行数が多すぎます。")
+    except csv.Error as exc:
+        raise CsvInputError("CSVとして読めません。") from exc
+    return data
 
 
 class WorkTimeApp(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
         self.title("勤務時間丸めツール")
-        
+
         # ウィンドウサイズを設定し、最小サイズを定義
         self.geometry("800x600")
         self.minsize(800, 600)
@@ -28,38 +134,52 @@ class WorkTimeApp(TkinterDnD.Tk):
         # 出勤時間と退勤時間の丸め選択用変数
         self.start_round_option = tk.StringVar(value="そのまま")
         self.end_round_option = tk.StringVar(value="そのまま")
-        self.break_start_round_option = tk.StringVar(value="そのまま") 
+        self.break_start_round_option = tk.StringVar(value="そのまま")
         self.break_end_round_option = tk.StringVar(value="そのまま")
 
     def on_drop(self, event):
-        file_path = event.data.strip('{}')
-        if file_path:
-            self.file_path = file_path
-            df = self.read_file(self.file_path)
-            self.upload_frame.pack_forget()
-            self.create_settings_ui(df)
-            self.settings_frame.pack(fill=tk.BOTH, expand=True)
-    
+        try:
+            paths = self._dropped_paths(getattr(event, "data", None))
+        except CsvInputError as exc:
+            messagebox.showerror("エラー", str(exc))
+            return
+        if len(paths) != 1:
+            messagebox.showerror("エラー", "ファイルは1つだけドロップしてください。")
+            return
+        self._open_path(paths[0])
 
+    def _dropped_paths(self, data):
+        # tkdnd はパスを Tcl リストとして渡す。splitlist はリスト分解のみで、
+        # コマンド置換や変数展開は行わない。
+        if not isinstance(data, str) or len(data) > MAX_DROP_CHARS:
+            raise CsvInputError("ドロップされたデータを解釈できません。")
+        try:
+            return list(self.tk.splitlist(data))
+        except tk.TclError as exc:
+            raise CsvInputError("ドロップされたデータを解釈できません。") from exc
 
     def create_upload_ui(self):
         for widget in self.upload_frame.winfo_children():
             widget.destroy()
 
-
         # ドラッグ＆ドロップエリアを明確にする
         drop_frame = tk.Frame(self.upload_frame, bd=2, relief="groove", bg="#e1e4e8")
         drop_frame.pack(padx=20, pady=20, fill=tk.BOTH, expand=True)
 
-        drop_label = tk.Label(drop_frame, text="ファイルをここにドラッグ＆ドロップ\nまたは", pady=20, padx=20,bg="#e1e4e8")
+        drop_label = tk.Label(
+            drop_frame,
+            text="ファイルをここにドラッグ＆ドロップ\nまたは",
+            pady=20,
+            padx=20,
+            bg="#e1e4e8",
+        )
         drop_label.pack(expand=True)
-
 
         open_button = tk.Button(drop_frame, text="ファイルを開く", command=self.open_file)
         open_button.pack(pady=10)
 
         drop_frame.drop_target_register(DND_FILES)
-        drop_frame.dnd_bind('<<Drop>>', self.on_drop)
+        drop_frame.dnd_bind("<<Drop>>", self.on_drop)
 
     def create_settings_ui(self, data):
         for widget in self.settings_frame.winfo_children():
@@ -67,49 +187,68 @@ class WorkTimeApp(TkinterDnD.Tk):
 
         # スクロール可能なテキストエリアを設定
         text_area = scrolledtext.ScrolledText(self.settings_frame, wrap=tk.WORD, height=10)
-        text_area.grid(row=0, column=0, columnspan=2, sticky='ew', padx=5, pady=5)
+        text_area.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
         text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
         for row in data:
             text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[6]}\t{row[15]}\n")
-        text_area.configure(state='disabled')
+        text_area.configure(state="disabled")
 
         # 出勤時間の丸め選択
         start_round_label = tk.Label(self.settings_frame, text="出勤時間の丸め選択：")
-        start_round_label.grid(row=3, column=0, pady=5, sticky='e')
+        start_round_label.grid(row=3, column=0, pady=5, sticky="e")
 
-        start_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.start_round_option, values=["8:30", "9:00", "そのまま"], width=15)
-        start_round_menu.grid(row=3, column=1, pady=5, sticky='w')
+        start_round_menu = ttk.Combobox(
+            self.settings_frame,
+            textvariable=self.start_round_option,
+            values=["8:30", "9:00", "そのまま"],
+            width=15,
+        )
+        start_round_menu.grid(row=3, column=1, pady=5, sticky="w")
 
         # 退勤時間の丸め選択
         end_round_label = tk.Label(self.settings_frame, text="退勤時間の丸め選択：")
-        end_round_label.grid(row=4, column=0, pady=5, sticky='e')
+        end_round_label.grid(row=4, column=0, pady=5, sticky="e")
 
-        end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.end_round_option, values=["12:40", "12:00 & 18:30", "そのまま"], width=15)
-        end_round_menu.grid(row=4, column=1, pady=5, sticky='w')
+        end_round_menu = ttk.Combobox(
+            self.settings_frame,
+            textvariable=self.end_round_option,
+            values=["12:40", "12:00 & 18:30", "そのまま"],
+            width=15,
+        )
+        end_round_menu.grid(row=4, column=1, pady=5, sticky="w")
 
         # 休憩開始時刻の丸め選択
         break_start_round_label = tk.Label(self.settings_frame, text="休憩開始時刻の丸め選択：")
-        break_start_round_label.grid(row=5, column=0, pady=5, sticky='e')
+        break_start_round_label.grid(row=5, column=0, pady=5, sticky="e")
 
-        break_start_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_start_round_option, values=["12:00","12:40", "そのまま"], width=15)
-        break_start_round_menu.grid(row=5, column=1, pady=5, sticky='w')
+        break_start_round_menu = ttk.Combobox(
+            self.settings_frame,
+            textvariable=self.break_start_round_option,
+            values=["12:00", "12:40", "そのまま"],
+            width=15,
+        )
+        break_start_round_menu.grid(row=5, column=1, pady=5, sticky="w")
 
         # 休憩終了時刻の丸め選択
         break_end_round_label = tk.Label(self.settings_frame, text="休憩終了時刻の丸め選択：")
-        break_end_round_label.grid(row=6, column=0, pady=5, sticky='e')
+        break_end_round_label.grid(row=6, column=0, pady=5, sticky="e")
 
-        break_end_round_menu = ttk.Combobox(self.settings_frame, textvariable=self.break_end_round_option, values=["14:25","15:00", "そのまま"], width=15)
-        break_end_round_menu.grid(row=6, column=1, pady=5, sticky='w')
+        break_end_round_menu = ttk.Combobox(
+            self.settings_frame,
+            textvariable=self.break_end_round_option,
+            values=["14:25", "15:00", "そのまま"],
+            width=15,
+        )
+        break_end_round_menu.grid(row=6, column=1, pady=5, sticky="w")
 
         execute_button = tk.Button(self.settings_frame, text="計算を実行", command=self.execute_calculation)
-        execute_button.grid(row=2, column=0, columnspan=2, pady=20)        
+        execute_button.grid(row=2, column=0, columnspan=2, pady=20)
 
         # グリッドの配置を調整
         self.settings_frame.columnconfigure(0, weight=1)
         self.settings_frame.columnconfigure(1, weight=1)
         self.settings_frame.rowconfigure(0, weight=1)
-
 
     def create_result_ui(self, hours, minutes, df):
         for widget in self.result_frame.winfo_children():
@@ -125,33 +264,41 @@ class WorkTimeApp(TkinterDnD.Tk):
         text_area.insert(tk.INSERT, "日付\t出勤\t休始\t休終\t退勤\t実働\n")
         for row in df:
             text_area.insert(tk.INSERT, f"{row[0]}\t{row[1]}\t{row[2]}\t{row[3]}\t{row[6]}\t{row[15]}\n")
-        text_area.configure(state='disabled')
+        text_area.configure(state="disabled")
 
         ok_button = tk.Button(self.result_frame, text="OK", command=self.reset_app)
         ok_button.pack(pady=10)
-    
+
     def open_file(self):
-        self.file_path = filedialog.askopenfilename()
-        if self.file_path:
-            df = self.read_file(self.file_path)
-            self.upload_frame.pack_forget()
-            self.create_settings_ui(df)
-            self.settings_frame.pack(fill=tk.BOTH, expand=True)
+        file_path = filedialog.askopenfilename()
+        if file_path:
+            self._open_path(file_path)
+
+    def _open_path(self, file_path):
+        try:
+            data = self.read_file(file_path)
+        except CsvInputError as exc:
+            messagebox.showerror("エラー", str(exc))
+            return
+        self.file_path = file_path
+        self.upload_frame.pack_forget()
+        self.create_settings_ui(data)
+        self.settings_frame.pack(fill=tk.BOTH, expand=True)
 
     def read_file(self, file_path):
-        data = []
-        with open(file_path, 'r', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            next(reader)  # ヘッダー行をスキップ
-            for row in reader:
-                if row[1] != '':  # 出勤時間が記録されている行のみを追加
-                    data.append(row)
-        return data
+        return load_attendance_csv(file_path)
 
     def execute_calculation(self):
-        hours, minutes, data = self.process_file(self.file_path)  # 丸めた時刻を含むデータフレームを受け取る
+        try:
+            hours, minutes, data = self.process_file(self.file_path)
+        except CsvInputError as exc:
+            messagebox.showerror("エラー", str(exc))
+            return
+        except (ValueError, IndexError, OSError, UnicodeError):
+            messagebox.showerror("エラー", "時刻データが不正なため計算できません。")
+            return
         self.settings_frame.pack_forget()
-        self.create_result_ui(hours, minutes, data)  # 丸めた時刻を含むデータフレームを渡す
+        self.create_result_ui(hours, minutes, data)
         self.result_frame.pack(fill=tk.BOTH, expand=True)
 
     def reset_app(self):
@@ -160,90 +307,88 @@ class WorkTimeApp(TkinterDnD.Tk):
         self.upload_frame.pack(fill=tk.BOTH, expand=True)
 
     def round_time(self, time_str, option, type):
-        if time_str == '' or time_str in ['−', '-'] or option == "そのまま":
+        if time_str == "" or time_str in ["−", "-"] or option == "そのまま":
             return time_str
 
-        time_obj = datetime.strptime(time_str, '%H:%M')
+        time_obj = datetime.strptime(time_str, "%H:%M")
         if type == "start":
-            if option == "8:30" and time_obj < datetime.strptime("9:00", '%H:%M'):
-                return "8:30" if (datetime.strptime("8:30", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
+            if option == "8:30" and time_obj < datetime.strptime("9:00", "%H:%M"):
+                return "8:30" if (datetime.strptime("8:30", "%H:%M") - time_obj).total_seconds() / 60 <= 20 else time_str
             elif option == "9:00":
-                return "9:00" if (datetime.strptime("9:00", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
+                return "9:00" if (datetime.strptime("9:00", "%H:%M") - time_obj).total_seconds() / 60 <= 20 else time_str
         elif type == "end":
-            if option == "12:40" and time_obj > datetime.strptime("12:00", '%H:%M'):
-                return "12:40" if (time_obj - datetime.strptime("12:40", '%H:%M')).total_seconds() / 60 <= 20 else time_str
+            if option == "12:40" and time_obj > datetime.strptime("12:00", "%H:%M"):
+                return "12:40" if (time_obj - datetime.strptime("12:40", "%H:%M")).total_seconds() / 60 <= 20 else time_str
             elif option == "12:00&18:30":
-                if time_obj > datetime.strptime("11:30", '%H:%M'):
-                    return "12:00" if (datetime.strptime("12:00", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
-                elif time_obj > datetime.strptime("18:00", '%H:%M'):
-                    return "18:30" if (datetime.strptime("18:30", '%H:%M') - time_obj).total_seconds() / 60 <= 20 else time_str
+                if time_obj > datetime.strptime("11:30", "%H:%M"):
+                    return "12:00" if (datetime.strptime("12:00", "%H:%M") - time_obj).total_seconds() / 60 <= 20 else time_str
+                elif time_obj > datetime.strptime("18:00", "%H:%M"):
+                    return "18:30" if (datetime.strptime("18:30", "%H:%M") - time_obj).total_seconds() / 60 <= 20 else time_str
 
         return time_str
 
     def process_file(self, file_path):
         data = self.read_file(file_path)
-    
+
         for row in data:
             # 出勤時間の丸め処理
             row[1] = self.round_time(row[1], self.start_round_option.get(), "start")
-        
+
             # 退勤時間の丸め処理
             row[6] = self.round_time(row[6], self.end_round_option.get(), "end")
-        
+
             # 休憩時間の丸め処理
             row[3] = self.round_break_end_time(row[3], self.break_end_round_option.get())
-        
+
             # 休憩開始時刻の丸め処理
             row[2] = self.round_break_start_time(row[2], self.break_start_round_option.get())
-        
+
             # 退勤時刻が記録されていない場合、休憩開始時刻を勤務終了時刻として扱う処理
             if ":" not in row[6] and ":" in row[2]:
                 row[6] = row[2]
-    
+
         total_work_seconds = 0
         for row in data:
-            start_time = datetime.strptime(row[1], '%H:%M')
-            end_time = datetime.strptime(row[6], '%H:%M')
+            start_time = datetime.strptime(row[1], "%H:%M")
+            end_time = datetime.strptime(row[6], "%H:%M")
             work_time = end_time - start_time
             break_time = calculate_break_time(row[2], row[3])
             total_work_seconds += (work_time - break_time).total_seconds()
-    
+
         total_hours = total_work_seconds // 3600
         total_minutes = (total_work_seconds % 3600) // 60
-    
+
         return int(total_hours), int(total_minutes), data
 
-
     def round_break_end_time(self, time_str, option):
-        if time_str == '' or time_str in ['−', '-'] or option == "そのまま":
+        if time_str == "" or time_str in ["−", "-"] or option == "そのまま":
             return time_str
-        time_obj = datetime.strptime(time_str, '%H:%M')
-        if option == "15:00" and datetime.strptime("14:45", '%H:%M') <= time_obj <= datetime.strptime("15:00", '%H:%M'):
+        time_obj = datetime.strptime(time_str, "%H:%M")
+        if option == "15:00" and datetime.strptime("14:45", "%H:%M") <= time_obj <= datetime.strptime("15:00", "%H:%M"):
             return "15:00"
-        elif option == "14:25" and datetime.strptime("14:05", '%H:%M') <= time_obj <= datetime.strptime("14:25", '%H:%M'):
+        elif option == "14:25" and datetime.strptime("14:05", "%H:%M") <= time_obj <= datetime.strptime("14:25", "%H:%M"):
             return "14:25"
-        return time_str 
-    
+        return time_str
+
     def round_break_start_time(self, time_str, option):
-        if time_str == '' or time_str in ['−', '-'] or option == "そのまま":
+        if time_str == "" or time_str in ["−", "-"] or option == "そのまま":
             return time_str
 
-        time_obj = datetime.strptime(time_str, '%H:%M')
-        if option == "12:00" and datetime.strptime("11:40", '%H:%M') <= time_obj <= datetime.strptime("12:00", '%H:%M'):
+        time_obj = datetime.strptime(time_str, "%H:%M")
+        if option == "12:00" and datetime.strptime("11:40", "%H:%M") <= time_obj <= datetime.strptime("12:00", "%H:%M"):
             return "12:00"
-        elif option == "12:40" and datetime.strptime("12:20", '%H:%M') <= time_obj <= datetime.strptime("12:40", '%H:%M'):
+        elif option == "12:40" and datetime.strptime("12:20", "%H:%M") <= time_obj <= datetime.strptime("12:40", "%H:%M"):
             return "12:40"
 
         return time_str
 
+
 def calculate_break_time(start, end):
-    if start == '' or end == '' or start in ['−', '-'] or end in ['−', '-']:
+    if start == "" or end == "" or start in ["−", "-"] or end in ["−", "-"]:
         return timedelta(0)
-    start_time = datetime.strptime(start, '%H:%M')
-    end_time = datetime.strptime(end, '%H:%M')
+    start_time = datetime.strptime(start, "%H:%M")
+    end_time = datetime.strptime(end, "%H:%M")
     return end_time - start_time
-
-
 
 
 if __name__ == "__main__":
